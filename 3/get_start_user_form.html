@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<title> | Address Registration |  Services</title>
+<title>Address Registration |  Services</title>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
@@ -40,9 +40,9 @@ body,h1,h2,h3,h4,h5,h6 {font-family: "Lato", sans-serif}
 
 <!-- Header -->
 <header class="w3-container w3-red w3-center" style="padding:128px 16px">
-  <h1 class="w3-margin w3-jumbo">Welcome</h1>
+  <h1 class="w3-margin w3-jumbo">Welcome Landing</h1>
   <p class="w3-xlarge">Delivery Address Registration </p>
-  <button class="w3-button w3-black w3-padding-large w3-large w3-margin-top"><a href="https://wa.me/8801955255066/" style="text-decoration:none">Get Help - WhatsApp</a></button>
+  <button class="w3-button w3-black w3-padding-large w3-large w3-margin-top"><a href="https://m.me/medicare.dhaka/" style="text-decoration:none">Get Help - Messenger</a></button>
 </header>
 
 <!-- First Grid -->
@@ -85,10 +85,25 @@ body,h1,h2,h3,h4,h5,h6 {font-family: "Lato", sans-serif}
       </div>
 
       <div class="w3-third w3-center">
-        <img src="medicare_logo.png" alt="Logo">
+        <img src="medicare_logo.png" alt="MediCare Logo">
         <i class="fa fa- w3-padding-64 w3-text-red"></i>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Data Management Section -->
+<div class="w3-container w3-padding-32">
+  <div class="w3-card-4 w3-round">
+    <div class="w3-container w3-blue">
+      <h2>Data Management</h2>
+    </div>
+    <div class="w3-container w3-padding-16">
+      <button onclick="showAllData()" class="w3-btn w3-blue w3-margin-right">View All Saved Data</button>
+      <button onclick="exportData()" class="w3-btn w3-green w3-margin-right">Export Data as JSON</button>
+      <button onclick="clearAllData()" class="w3-btn w3-red">Clear All Data</button>
+    </div>
+    <div id="allData" class="w3-container w3-margin-top" style="display:none;"></div>
   </div>
 </div>
 
@@ -189,6 +204,73 @@ function saveFormData(data) {
   console.log('All saved data:', savedData);
 }
 
+// Function to display all saved data
+function showAllData() {
+  const savedData = JSON.parse(localStorage.getItem('medicareRegistrations') || '[]');
+  const displayDiv = document.getElementById('allData');
+  
+  if (savedData.length === 0) {
+    displayDiv.innerHTML = '<p class="w3-text-red">No data saved yet.</p>';
+  } else {
+    let html = '<h3>All Saved Registrations:</h3>';
+    savedData.forEach((data, index) => {
+      html += `
+        <div class="w3-panel w3-border w3-round-large w3-light-grey">
+          <h4>Registration #${index + 1}</h4>
+          <p><strong>Name:</strong> ${data.name}</p>
+          <p><strong>Email:</strong> ${data.email}</p>
+          <p><strong>Phone:</strong> ${data.phone}</p>
+          <p><strong>Product Link:</strong> <a href="${data.p_link}" target="_blank">${data.p_link}</a></p>
+          <p><strong>Address:</strong> ${data.address}</p>
+          <p><strong>Submitted:</strong> ${data.timestamp}</p>
+          <button onclick="deleteEntry(${index})" class="w3-btn w3-red w3-small">Delete This Entry</button>
+        </div>
+      `;
+    });
+    
+    html += `<p class="w3-text-blue">Total registrations: ${savedData.length}</p>`;
+    displayDiv.innerHTML = html;
+  }
+  
+  displayDiv.style.display = 'block';
+}
+
+// Function to delete a specific entry
+function deleteEntry(index) {
+  let savedData = JSON.parse(localStorage.getItem('medicareRegistrations') || '[]');
+  savedData.splice(index, 1);
+  localStorage.setItem('medicareRegistrations', JSON.stringify(savedData));
+  showAllData(); // Refresh the display
+}
+
+// Function to clear all data
+function clearAllData() {
+  if (confirm('Are you sure you want to delete ALL saved data? This cannot be undone!')) {
+    localStorage.removeItem('medicareRegistrations');
+    document.getElementById('allData').innerHTML = '<p class="w3-text-green">All data cleared successfully.</p>';
+  }
+}
+
+// Function to export data as JSON file
+function exportData() {
+  const savedData = JSON.parse(localStorage.getItem('medicareRegistrations') || '[]');
+  
+  if (savedData.length === 0) {
+    alert('No data to export!');
+    return;
+  }
+  
+  const dataStr = JSON.stringify(savedData, null, 2);
+  const dataBlob = new Blob([dataStr], {type: 'application/json'});
+  
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(dataBlob);
+  link.download = 'medicare_registrations.json';
+  link.click();
+  
+  alert('Data exported successfully!');
+}
+
 // Function to display visitor information
 function displayVisitorInfo() {
   const visitorInfoDiv = document.getElementById('visitorInfo');
@@ -230,4 +312,4 @@ window.onload = function() {
 </script>
 
 </body>
-        </html>
+</html>
