@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>SM-Cable Network | Billing System v1.0</title>
+    <link rel="icon" type="image/png" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%231e3a8a'/%3E%3Ctext x='50' y='67' font-size='50' text-anchor='middle' fill='white' font-weight='bold'%3ESM%3C/text%3E%3C/svg%3E">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        * { transition: all 0.2s ease; }
+        .sidebar { transition: transform 0.3s ease; }
+        .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; left: -280px; top: 0; height: 100%; z-index: 1000; width: 280px; background: white; }
+            .sidebar.open { left: 0; }
+            .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999; display: none; }
+            .overlay.open { display: block; }
+        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: #1e3a8a; border-radius: 10px; }
+        @media print { .no-print { display: none !important; } }
+        body { background: #f3f4f6; }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    <script>
+        // ==================== DATA STRUCTURE ====================
+        let appData = {
+            admin: { pin: "0000", lateFee: 50, dueDays: 30, whatsappNumber: "8801405080401" },
+            users: [],
+            packages: { internet: [], cable: [], combo: [] },
+            bills: [],
+            transactions: [],
+            lastBackupTime: null,
+            settings: {
+                businessName: "SM-Cable Network",
+                version: "1.0",
+                address: "Mirpur, Dhaka 1216",
+                phone: ["01405080401", "01950025522"],
+                email: "info.smcablenet@gmail.com",
+                whatsapp: "8801405080401",
+                lateFee: 50,
+                dueDays: 30,
+                autoBillDay: 1
+            }
+        };
+
+        let currentView = "dashboard";
+        let darkMode = localStorage.getItem("darkMode") === "true";
+
+        // ==================== HELPER FUNCTIONS ====================
+        function formatDate(date) {
+            const d = new Date(date);
+            return `${d.getDate().toString().padStart(2,'0')}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getFullYear()}`;
+        }
+
+        function formatMonthYear(date) {
+            const d = new Date(date);
+            const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            return `${months[d.getMonth()]} - ${d.getFullYear()}`;
+        }
+
+        function getMonthOptions() {
+            const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const currentYear = new Date().getFullYear();
+            const options = [];
+            for (let i = 0; i < 12; i++) {
+                options.push(`${months[i]} - ${currentYear}`);
+                options.push(`${months[i]} - ${currentYear - 1}`);
+            }
+            return [...new Set(options)].sort().reverse();
+        }
+
+        function formatCurrency(amount) {
+            return `৳${amount.toLocaleString()}`;
+        }
+
+        function parseDate(dateStr) {
+            if (!dateStr) return new Date();
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+                return new Date(parts[2], parts[1]-1, parts[0]);
+            }
+            return new Date(dateStr);
+        }
+
+        function isOverdue(dueDateStr) {
+            if (!dueDateStr) return false;
+            const due = parseDate(dueDateStr);
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            return today > due;
+        }
+
+        function saveToLocal() {
+            const saveData = {
+                users: appData.users,
+                packages: appData.packages,
+                bills: appData.bills,
+                transactions: appData.transactions,
+                admin: appData.admin,
+                settings: appData.settings,
+                lastBackupTime: new Date().toISOString()
+            };
+            localStorage.setItem("smcable_data", JSON.stringify(saveData));
+            appData.lastBackupTime = new Date();
+        }
+
+        function loadFromLocal() {
+            const saved = localStorage.getItem("smcable_data");
+            if (saved) {
+                const data = JSON.parse(saved);
+                appData.users = data.users || [];
+                appData.packages = data.packages || { internet: [], cable: [], combo: [] };
+                appData.bills = data.bills || [];
+                appData.transactions = data.transactions || [];
+                appData.admin = data.admin || appData.admin;
+                appData.settings = data.settings || appData.settings;
+                appData.lastBackupTime = data.lastBackupTime ? new Date(data.lastBackupTime) : null;
+            }
+            
+            if (appData.packages.internet.length === 0) {
+                appData.packages.internet = [
+                    { id: "int_30", name: "30 Mbps", price: 500 },
+                    { id: "int_50", name: "50 Mbps", price: 700 },
+                    { id: "int_75", name: "75 Mbps", price: 900 },
+                    { id: "int_100", name: "100 Mbps", price: 1200 }
+                ];
+                appData.packages.cable = [
+                    { id: "cbl_basic", name: "Basic (30 Ch)", price: 300 },
+                    { id: "cbl_std", name: "Standard (80 Ch)", price: 500 },
+                    { id: "cbl_premium", name: "Premium (150 Ch)", price: 800 }
+                ];
+                appData.packages.combo = [
+                    { id: "com_basic", name: "Combo Basic", price: 700 },
+                    { id: "com_plus", name: "Combo Plus", price: 1000 },
+                    { id: "com_premium", name: "Combo Premium", price: 1500 }
+                ];
+            }
+            
+            if (appData.users.length === 0) {
+                appData.users.push({
+                    userId: "CBL001",
+                    name: "Rahim Khan",
+                    phone: "8801700000001",
+                    password: "1234",
+                    connectionType: "Both",
+                    packageId: "com_plus",
+                    packageName: "Combo Plus",
+                    monthlyBill: 1000,
+                    address: "Mirpur-1, Dhaka",
+                    expiredDate: formatDate(new Date(new Date().setMonth(new Date().getMonth() + 6))),
+                    paymentLink: "https://pay.smcable.net/CBL001",
+                    status: "active",
+                    createdAt: formatDate(new Date())
+                });
+            }
+            saveToLocal();
+        }
+
+        // ==================== WHATSAPP FUNCTIONS ====================
+        function sendWhatsApp(phoneNumber, message) {
+            let cleanPhone = phoneNumber.toString().replace(/[^0-9]/g, '');
+            if (!cleanPhone.startsWith('880') && cleanPhone.length === 10) {
+                cleanPhone = '88' + cleanPhone;
+            }
+            const encodedMsg = encodeURIComponent(message);
+            window.open(`https://wa.me/${cleanPhone}?text=${encodedMsg}`, '_blank');
+        }
+
+        function sendSupportWhatsApp(phoneNumber) {
+            const message = `Hello SM-Cable Network Support! I need assistance with my billing. My number is ${phoneNumber}.`;
+            sendWhatsApp(appData.settings.whatsapp, message);
+        }
+
+        function sendInvoiceWhatsApp(user, bill) {
+            const message = `🏢 *SM-Cable Network* 🏢\n\nDear *${user.name}*,\n\n📄 *BILL INVOICE* 📄\n━━━━━━━━━━━━━━━━\n🗓️ Month: ${bill.month}\n💰 Package Amount: ${formatCurrency(user.monthlyBill)}\n📋 Previous Due: ${formatCurrency(bill.previousDue || 0)}\n💰 Total Bill: ${formatCurrency(bill.amount)}\n✅ Paid: ${formatCurrency(bill.paid)}\n⚠️ Current Due: ${formatCurrency(bill.due)}\n📅 Due Date: ${bill.dueDate}\n\n🔗 *Pay Online:* ${user.paymentLink}\n\n📞 Support: ${appData.settings.phone[0]}\n📍 ${appData.settings.address}\n\nThank you for being with SM-Cable Network!`;
+            sendWhatsApp(user.phone, message);
+        }
+
+        function sendBillCreationWhatsApp(user, bill) {
+            const message = `🏢 *SM-Cable Network* 🏢\n\n📢 *NEW BILL GENERATED* 📢\n\nDear *${user.name}*,\n\nYour bill for *${bill.month}* has been generated.\n\n━━━━━━━━━━━━━━━━\n💰 Package Amount: ${formatCurrency(user.monthlyBill)}\n📋 Previous Due: ${formatCurrency(bill.previousDue || 0)}\n💰 *Total Bill: ${formatCurrency(bill.amount)}*\n📅 Due Date: ${bill.dueDate}\n━━━━━━━━━━━━━━━━\n\n🔗 *Pay Now:* ${user.paymentLink}\n\nPlease clear your dues before the due date to avoid late fees.\n\nThank you!\n📞 Support: ${appData.settings.phone[0]}`;
+            sendWhatsApp(user.phone, message);
+        }
+
+        // ==================== BILLING ENGINE ====================
+        // Get total due from ALL previous months (not just last month)
+        function getTotalPreviousDue(userId, currentMonthYear) {
+            const allBills = appData.bills.filter(b => b.userId === userId && b.month !== currentMonthYear);
+            return allBills.reduce((sum, b) => sum + b.due, 0);
+        }
+
+        // Get latest bill for a user
+        function getLatestBill(userId) {
+            const userBills = appData.bills.filter(b => b.userId === userId);
+            if (userBills.length === 0) return null;
+            return userBills.sort((a, b) => b.month.localeCompare(a.month))[0];
+        }
+
+        function generateMonthlyBill(userId, monthYear) {
+            const user = appData.users.find(u => u.userId === userId);
+            if (!user || user.status !== "active") return null;
+            
+            // Check if bill already exists for this month
+            const existingBill = appData.bills.find(b => b.userId === userId && b.month === monthYear);
+            if (existingBill) return existingBill;
+            
+            // Calculate previous due from ALL previous months
+            const previousDue = getTotalPreviousDue(userId, monthYear);
+            
+            // Calculate total bill = package price + previous due
+            let totalBill = user.monthlyBill + previousDue;
+            let lateFee = 0;
+            
+            // Check if latest bill is overdue for late fee
+            const latestBill = getLatestBill(userId);
+            if (latestBill && latestBill.dueDate && isOverdue(latestBill.dueDate) && latestBill.due > 0) {
+                lateFee = appData.admin.lateFee;
+                totalBill += lateFee;
+            }
+            
+            const dueDate = new Date();
+            dueDate.setDate(dueDate.getDate() + appData.admin.dueDays);
+            
+            const newBill = {
+                billId: `BILL-${Date.now()}-${userId}`,
+                userId: userId,
+                month: monthYear,
+                generatedDate: formatDate(new Date()),
+                amount: totalBill,
+                paid: 0,
+                due: totalBill,
+                previousDue: previousDue,
+                packageAmount: user.monthlyBill,
+                lateFee: lateFee,
+                dueDate: formatDate(dueDate),
+                status: "unpaid",
+                paymentHistory: []
+            };
+            appData.bills.push(newBill);
+            saveToLocal();
+            
+            // Send WhatsApp notification for new bill
+            sendBillCreationWhatsApp(user, newBill);
+            
+            return newBill;
+        }
+
+        function recordPayment(userId, monthYear, amount, method = "cash") {
+            // Find the specific bill for that month
+            let bill = appData.bills.find(b => b.userId === userId && b.month === monthYear);
+            
+            if (!bill) {
+                // If no bill exists for that month, create one first
+                bill = generateMonthlyBill(userId, monthYear);
+                if (!bill) return { success: false, message: "Cannot create bill for this user" };
+            }
+            
+            const paymentAmount = Math.min(amount, bill.due);
+            bill.paid += paymentAmount;
+            bill.due -= paymentAmount;
+            bill.status = bill.due === 0 ? "paid" : "partial";
+            
+            if (bill.paymentHistory) {
+                bill.paymentHistory.push({
+                    date: formatDate(new Date()),
+                    amount: paymentAmount,
+                    method: method
+                });
+            } else {
+                bill.paymentHistory = [{
+                    date: formatDate(new Date()),
+                    amount: paymentAmount,
+                    method: method
+                }];
+            }
+            
+            // Also update all subsequent bills' previous due calculations
+            // Get all future bills and recalculate their due
+            const userBills = appData.bills.filter(b => b.userId === userId).sort((a, b) => a.month.localeCompare(b.month));
+            let runningDue = 0;
+            for (let i = 0; i < userBills.length; i++) {
+                const currentBill = userBills[i];
+                if (currentBill.month === monthYear) {
+                    runningDue = currentBill.due;
+                } else {
+                    // Recalculate this bill based on running due
+                    const oldAmount = currentBill.amount;
+                    currentBill.previousDue = runningDue;
+                    currentBill.amount = currentBill.packageAmount + runningDue + (currentBill.lateFee || 0);
+                    const amountDiff = currentBill.amount - oldAmount;
+                    currentBill.due += amountDiff;
+                    runningDue = currentBill.due;
+                }
+            }
+            
+            appData.transactions.push({
+                id: `TXN-${Date.now()}`,
+                userId: userId,
+                userName: appData.users.find(u => u.userId === userId)?.name,
+                date: formatDate(new Date()),
+                monthYear: monthYear,
+                amount: paymentAmount,
+                type: "payment",
+                method: method,
+                receivedBy: "admin"
+            });
+            saveToLocal();
+            return { success: true, amount: paymentAmount, remaining: bill.due };
+        }
+
+        function updateUserPackage(userId, packageId, packageName, monthlyBill) {
+            const user = appData.users.find(u => u.userId === userId);
+            if (user) {
+                user.packageId = packageId;
+                user.packageName = packageName;
+                user.monthlyBill = monthlyBill;
+                saveToLocal();
+                return true;
+            }
+            return false;
+        }
+
+        function getMonthlyOverview(monthYear) {
+            const overview = [];
+            appData.users.forEach(user => {
+                const bill = appData.bills.find(b => b.userId === user.userId && b.month === monthYear);
+                const totalDue = getTotalPreviousDue(user.userId, monthYear);
+                overview.push({
+                    userId: user.userId,
+                    name: user.name,
+                    phone: user.phone,
+                    monthlyBill: user.monthlyBill,
+                    previousDue: bill ? bill.previousDue : totalDue,
+                    currentBill: bill ? bill.amount : 0,
+                    paid: bill ? bill.paid : 0,
+                    due: bill ? bill.due : totalDue,
+                    status: bill ? bill.status : "No Bill",
+                    connectionType: user.connectionType
+                });
+            });
+            return overview;
+        }
+
+        // ==================== PACKAGE MANAGEMENT ====================
+        function addPackage(type, name, price) {
+            const id = `${type}_${Date.now()}`;
+            appData.packages[type].push({ id, name, price });
+            saveToLocal();
+        }
+
+        function deletePackage(type, id) {
+            appData.packages[type] = appData.packages[type].filter(p => p.id !== id);
+            saveToLocal();
+        }
+
+        function editPackage(type, id, name, price) {
+            const pkg = appData.packages[type].find(p => p.id === id);
+            if (pkg) {
+                pkg.name = name;
+                pkg.price = price;
+                saveToLocal();
+            }
+        }
+
+        // ==================== RENDER FUNCTIONS ====================
+        function renderApp() {
+            if (darkMode) document.body.classList.add("dark");
+            else document.body.classList.remove("dark");
+            
+            const isLoggedIn = sessionStorage.getItem("loggedIn");
+            if (!isLoggedIn) {
+                renderLogin();
+                return;
+            }
+            const userType = sessionStorage.getItem("userType");
+            if (userType === "admin") {
+                renderAdminDashboard();
+            } else {
+                const userId = sessionStorage.getItem("userId");
+                const user = appData.users.find(u => u.userId === userId);
+                if (user) renderCustomerPortal(user);
+                else renderLogin();
+            }
+        }
+
+        function renderLogin() {
+            const html = `
+                <div class="min-h-screen bg-gradient-to-br from-blue-900 to-purple-900 flex items-center justify-center p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+                        <div class="bg-blue-600 p-6 text-center">
+                            <div class="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-3">
+                                <span class="text-3xl font-bold text-blue-600">SM</span>
+                            </div>
+                            <h1 class="text-2xl font-bold text-white">SM-Cable Network</h1>
+                            <p class="text-blue-100 text-sm">ISP & DISH OFFICE</p>
+                        </div>
+                        <div class="p-6">
+                            <div class="flex gap-2 mb-6">
+                                <button onclick="showLoginTab('admin')" id="adminTabBtn" class="flex-1 py-2 rounded-lg font-semibold bg-blue-600 text-white">Admin Login</button>
+                                <button onclick="showLoginTab('customer')" id="customerTabBtn" class="flex-1 py-2 rounded-lg font-semibold bg-gray-200 text-gray-700">Customer Login</button>
+                            </div>
+                            <div id="loginForm">
+                                <div id="adminLoginForm">
+                                    <div class="mb-4">
+                                        <label class="block text-gray-700 mb-2">Admin Acess</label>
+                                        <input type="password" id="adminPin" placeholder="Enter Admin PIN" class="w-full px-4 py-2 border rounded-lg" maxlength="6">
+                                    </div>
+                                    <button onclick="adminLogin()" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-semibold">Login</button>
+                                </div>
+                                <div id="customerLoginForm" style="display:none;">
+                                    <div class="mb-4">
+                                        <label class="block text-gray-700 mb-2">Phone Number</label>
+                                        <input type="tel" id="customerPhone" placeholder="88017xxxxxxxx" class="w-full px-4 py-2 border rounded-lg">
+                                    </div>
+                                    <div class="mb-4">
+                                        <label class="block text-gray-700 mb-2">Password</label>
+                                        <input type="password" id="customerPassword" placeholder="Enter password" class="w-full px-4 py-2 border rounded-lg">
+                                    </div>
+                                    <button onclick="customerLogin()" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-semibold">Login</button>
+                                </div>
+                            </div>
+                            <div class="mt-6 text-center text-sm text-gray-500">
+                                <p>📍 Mirpur, Dhaka 1216</p>
+                                <p>📞 ${appData.settings.phone[0]} | ${appData.settings.phone[1]}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById("app").innerHTML = html;
+        }
+
+        function renderAdminDashboard() {
+            const totalUsers = appData.users.length;
+            const activeUsers = appData.users.filter(u => u.status === "active").length;
+            const totalDue = appData.bills.reduce((sum, b) => sum + b.due, 0);
+            const monthlyCollection = appData.transactions.filter(t => t.monthYear === formatMonthYear(new Date())).reduce((sum, t) => sum + t.amount, 0);
+            
+            const html = `
+                <div class="flex min-h-screen">
+                    <div class="overlay" onclick="closeSidebar()"></div>
+                    <div class="sidebar fixed md:relative md:translate-x-0 bg-white shadow-xl z-50 flex flex-col" id="sidebar">
+                        <div class="p-4 border-b flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+                                    <span class="text-white font-bold text-sm">SM</span>
+                                </div>
+                                <span class="font-bold text-gray-800">SM-Cable</span>
+                            </div>
+                            <button onclick="closeSidebar()" class="md:hidden text-gray-500"><i class="fas fa-times"></i></button>
+                        </div>
+                        <nav class="flex-1 p-4">
+                            <button onclick="setView('dashboard')" class="w-full text-left px-4 py-2 rounded-lg mb-1 flex items-center gap-3 hover:bg-gray-100 ${currentView === 'dashboard' ? 'bg-blue-50 text-blue-600' : ''}">
+                                <i class="fas fa-tachometer-alt w-5"></i> Dashboard
+                            </button>
+                            <button onclick="setView('users')" class="w-full text-left px-4 py-2 rounded-lg mb-1 flex items-center gap-3 hover:bg-gray-100">
+                                <i class="fas fa-users w-5"></i> Users
+                            </button>
+                            <button onclick="setView('packages')" class="w-full text-left px-4 py-2 rounded-lg mb-1 flex items-center gap-3 hover:bg-gray-100">
+                                <i class="fas fa-box w-5"></i> Packages
+                            </button>
+                            <button onclick="setView('billing')" class="w-full text-left px-4 py-2 rounded-lg mb-1 flex items-center gap-3 hover:bg-gray-100">
+                                <i class="fas fa-file-invoice-dollar w-5"></i> Billing
+                            </button>
+                            <button onclick="setView('monthlyOverview')" class="w-full text-left px-4 py-2 rounded-lg mb-1 flex items-center gap-3 hover:bg-gray-100">
+                                <i class="fas fa-calendar-alt w-5"></i> Monthly Overview
+                            </button>
+                            <button onclick="setView('transactions')" class="w-full text-left px-4 py-2 rounded-lg mb-1 flex items-center gap-3 hover:bg-gray-100">
+                                <i class="fas fa-history w-5"></i> Transactions
+                            </button>
+                            <button onclick="setView('settings')" class="w-full text-left px-4 py-2 rounded-lg mb-1 flex items-center gap-3 hover:bg-gray-100">
+                                <i class="fas fa-cog w-5"></i> Settings
+                            </button>
+                        </nav>
+                        <div class="p-4 border-t">
+                            <button onclick="logout()" class="w-full text-left px-4 py-2 rounded-lg text-red-600 hover:bg-red-50 flex items-center gap-3">
+                                <i class="fas fa-sign-out-alt w-5"></i> Logout
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="flex-1">
+                        <header class="bg-white shadow-sm p-4 flex items-center justify-between">
+                            <button onclick="toggleSidebar()" class="md:hidden text-gray-600"><i class="fas fa-bars text-xl"></i></button>
+                            <h2 class="text-lg font-semibold">${currentView.charAt(0).toUpperCase() + currentView.slice(1)}</h2>
+                            <div class="flex items-center gap-3">
+                                <button onclick="toggleDarkMode()" class="p-2 rounded-full hover:bg-gray-100">
+                                    <i class="fas ${darkMode ? 'fa-sun' : 'fa-moon'}"></i>
+                                </button>
+                                <span class="text-sm text-gray-500">${formatDate(new Date())}</span>
+                            </div>
+                        </header>
+                        <main class="p-4 md:p-6" id="mainContent"></main>
+                    </div>
+                </div>
+            `;
+            document.getElementById("app").innerHTML = html;
+            renderCurrentView();
+        }
+
+        function renderCurrentView() {
+            const container = document.getElementById("mainContent");
+            if (!container) return;
+            
+            if (currentView === "dashboard") renderDashboard(container);
+            else if (currentView === "users") renderUsersPage(container);
+            else if (currentView === "packages") renderPackagesPage(container);
+            else if (currentView === "billing") renderBillingPage(container);
+            else if (currentView === "monthlyOverview") renderMonthlyOverview(container);
+            else if (currentView === "transactions") renderTransactionsPage(container);
+            else if (currentView === "settings") renderSettingsPage(container);
+        }
+
+        function renderDashboard(container) {
+            const totalUsers = appData.users.length;
+            const activeUsers = appData.users.filter(u => u.status === "active").length;
+            const totalDue = appData.bills.reduce((sum, b) => sum + b.due, 0);
+            const monthlyCollection = appData.transactions.filter(t => t.monthYear === formatMonthYear(new Date())).reduce((sum, t) => sum + t.amount, 0);
+            
+            container.innerHTML = `
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-white rounded-xl p-4 shadow-sm card-hover">
+                        <div class="flex items-center justify-between">
+                            <div><p class="text-gray-500 text-sm">Total Users</p><p class="text-2xl font-bold">${totalUsers}</p></div>
+                            <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center"><i class="fas fa-users text-blue-600"></i></div>
+                        </div>
+                        <div class="mt-2 text-sm"><span class="text-green-600">${activeUsers} Active</span></div>
+                    </div>
+                    <div class="bg-white rounded-xl p-4 shadow-sm card-hover">
+                        <div class="flex items-center justify-between">
+                            <div><p class="text-gray-500 text-sm">Monthly Collection</p><p class="text-2xl font-bold">${formatCurrency(monthlyCollection)}</p></div>
+                            <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center"><i class="fas fa-money-bill-wave text-green-600"></i></div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-xl p-4 shadow-sm card-hover">
+                        <div class="flex items-center justify-between">
+                            <div><p class="text-gray-500 text-sm">Total Due</p><p class="text-2xl font-bold text-red-600">${formatCurrency(totalDue)}</p></div>
+                            <div class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center"><i class="fas fa-exclamation-triangle text-red-600"></i></div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-xl p-4 shadow-sm card-hover">
+                        <div class="flex items-center justify-between">
+                            <div><p class="text-gray-500 text-sm">Current Month</p><p class="text-2xl font-bold">${formatMonthYear(new Date())}</p></div>
+                            <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center"><i class="fas fa-calendar text-purple-600"></i></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-xl p-4 shadow-sm">
+                    <h3 class="font-semibold mb-3">Recent Transactions</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="border-b"><tr><th class="text-left py-2">Date</th><th class="text-left">User</th><th class="text-left">Month</th><th class="text-left">Amount</th><th class="text-left">Method</th></tr></thead>
+                            <tbody>${appData.transactions.slice(-10).reverse().map(t => `<tr class="border-b"><td class="py-2">${t.date}</td><td>${t.userName || t.userId}</td><td>${t.monthYear}</td><td class="text-green-600">${formatCurrency(t.amount)}</td><td>${t.method}</td></tr>`).join('')}</tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderUsersPage(container) {
+            function refreshUsers() {
+                container.innerHTML = `
+                    <div class="bg-white rounded-xl shadow-sm">
+                        <div class="p-4 border-b flex flex-wrap gap-3 justify-between items-center">
+                            <div class="flex gap-2 flex-wrap">
+                                <input type="text" id="searchUser" placeholder="Search..." class="px-3 py-2 border rounded-lg w-64">
+                            </div>
+                            <button onclick="showAddUserModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"><i class="fas fa-plus"></i> Add User</button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full">
+                                <thead class="bg-gray-50">
+                                    <tr><th class="p-3 text-left">ID</th><th class="p-3 text-left">Name</th><th class="p-3 text-left">Phone</th><th class="p-3 text-left">Package</th><th class="p-3 text-left">Bill</th><th class="p-3 text-left">Expiry</th><th class="p-3 text-left">Status</th><th class="p-3 text-left">Actions</th></tr>
+                                </thead>
+                                <tbody>${appData.users.map(user => `
+                                    <tr class="border-b">
+                                        <td class="p-3">${user.userId}</td>
+                                        <td class="p-3">${user.name}</td>
+                                        <td class="p-3">${user.phone}</td>
+                                        <td class="p-3">${user.packageName || user.connectionType}</td>
+                                        <td class="p-3">${formatCurrency(user.monthlyBill)}</td>
+                                        <td class="p-3">${user.expiredDate}</td>
+                                        <td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${user.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${user.status}</span></td>
+                                        <td class="p-3">
+                                            <button onclick="editUser('${user.userId}')" class="text-blue-600 mr-2"><i class="fas fa-edit"></i></button>
+                                            <button onclick="deleteUser('${user.userId}')" class="text-red-600"><i class="fas fa-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                `).join('')}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+            refreshUsers();
+        }
+
+        function renderPackagesPage(container) {
+            function renderPackages() {
+                container.innerHTML = `
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        ${['internet', 'cable', 'combo'].map(type => `
+                            <div class="bg-white rounded-xl p-4">
+                                <h3 class="font-semibold mb-3 flex justify-between items-center">
+                                    <span>${type.toUpperCase()} Packages</span>
+                                    <button onclick="showAddPackageModal('${type}')" class="text-blue-600 text-sm"><i class="fas fa-plus"></i> Add</button>
+                                </h3>
+                                ${appData.packages[type].map(p => `
+                                    <div class="flex justify-between items-center p-2 border-b">
+                                        <span>${p.name}</span>
+                                        <span>${formatCurrency(p.price)}</span>
+                                        <div>
+                                            <button onclick="showEditPackageModal('${type}','${p.id}','${p.name}',${p.price})" class="text-blue-500 mr-2"><i class="fas fa-edit"></i></button>
+                                            <button onclick="deletePackageItem('${type}','${p.id}')" class="text-red-500"><i class="fas fa-trash"></i></button>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            renderPackages();
+        }
+
+        function renderBillingPage(container) {
+            const monthOptions = getMonthOptions();
+            const currentMonth = formatMonthYear(new Date());
+            
+            // Calculate previous due for selected user and month
+            function updatePreviousDue() {
+                const userId = document.getElementById('billUser')?.value;
+                const month = document.getElementById('billMonth')?.value;
+                if (userId && month) {
+                    const previousDue = getTotalPreviousDue(userId, month);
+                    document.getElementById('previousDue').value = formatCurrency(previousDue);
+                    const user = appData.users.find(u => u.userId === userId);
+                    if (user) {
+                        const totalAmount = user.monthlyBill + previousDue;
+                        document.getElementById('billAmount').value = totalAmount;
+                    }
+                }
+            }
+            
+            container.innerHTML = `
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Create New Bill -->
+                    <div class="bg-white rounded-xl p-4 shadow-sm">
+                        <h3 class="font-semibold mb-3 text-lg">Create New Bill</h3>
+                        <select id="billUser" class="w-full px-3 py-2 border rounded-lg mb-2">
+                            <option value="">Select User</option>
+                            ${appData.users.map(u => `<option value="${u.userId}" data-bill="${u.monthlyBill}" data-name="${u.name}">${u.name} (${u.userId}) - ${formatCurrency(u.monthlyBill)}/mo</option>`).join('')}
+                        </select>
+                        <select id="billMonth" class="w-full px-3 py-2 border rounded-lg mb-2">
+                            ${monthOptions.map(m => `<option value="${m}" ${m === currentMonth ? 'selected' : ''}>${m}</option>`).join('')}
+                        </select>
+                        <div class="grid grid-cols-2 gap-2 mb-2">
+                            <input type="text" id="packageAmount" class="w-full px-3 py-2 border rounded-lg bg-gray-100" placeholder="Package Amount" readonly>
+                            <input type="text" id="previousDue" class="w-full px-3 py-2 border rounded-lg bg-gray-100" placeholder="Previous Due" readonly>
+                        </div>
+                        <input type="number" id="billAmount" class="w-full px-3 py-2 border rounded-lg mb-2" placeholder="Total Bill Amount" readonly>
+                        <button onclick="createNewBill()" class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full"><i class="fas fa-plus-circle"></i> Generate Bill & Send WhatsApp</button>
+                    </div>
+                    
+                    <!-- Record Payment -->
+                    <div class="bg-white rounded-xl p-4 shadow-sm">
+                        <h3 class="font-semibold mb-3 text-lg">Record Payment</h3>
+                        <select id="paymentUser" class="w-full px-3 py-2 border rounded-lg mb-2">
+                            <option value="">Select User</option>
+                            ${appData.users.map(u => `<option value="${u.userId}">${u.name} (${u.userId})</option>`).join('')}
+                        </select>
+                        <select id="paymentMonth" class="w-full px-3 py-2 border rounded-lg mb-2">
+                            <option value="">Select Month</option>
+                            ${monthOptions.map(m => `<option value="${m}">${m}</option>`).join('')}
+                        </select>
+                        <input type="number" id="paymentAmount" placeholder="Payment Amount" class="w-full px-3 py-2 border rounded-lg mb-2">
+                        <select id="paymentMethod" class="w-full px-3 py-2 border rounded-lg mb-2">
+                            <option value="cash">Cash</option>
+                            <option value="online">Online</option>
+                            <option value="bank">Bank Transfer</option>
+                        </select>
+                        <button onclick="recordPaymentFromAdmin()" class="bg-green-600 text-white px-4 py-2 rounded-lg w-full"><i class="fas fa-money-bill"></i> Record Payment</button>
+                    </div>
+                </div>
+                
+                <!-- Bills List -->
+                <div class="mt-6 bg-white rounded-xl p-4 shadow-sm">
+                    <h3 class="font-semibold mb-3">All Bills</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="border-b"><tr><th class="text-left py-2">User</th><th class="text-left">Month</th><th class="text-left">Package</th><th class="text-left">Previous Due</th><th class="text-left">Total Bill</th><th class="text-left">Paid</th><th class="text-left">Due</th><th class="text-left">Status</th><th class="text-left">Action</th></tr></thead>
+                            <tbody>${appData.bills.sort((a,b) => b.month.localeCompare(a.month)).map(bill => {
+                                const user = appData.users.find(u => u.userId === bill.userId);
+                                return `<tr class="border-b"><td class="py-2">${user?.name || bill.userId}</td>
+                                <td class="py-2">${bill.month}</td>
+                                <td class="py-2">${formatCurrency(bill.packageAmount || user?.monthlyBill || 0)}</td>
+                                <td class="py-2">${formatCurrency(bill.previousDue || 0)}</td>
+                                <td class="py-2">${formatCurrency(bill.amount)}</td>
+                                <td class="py-2">${formatCurrency(bill.paid)}</td>
+                                <td class="py-2 text-red-600 font-bold">${formatCurrency(bill.due)}</td>
+                                <td class="py-2"><span class="px-2 py-1 rounded-full text-xs ${bill.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">${bill.status}</span></td>
+                                <td class="py-2"><button onclick="sendBillInvoice('${bill.userId}','${bill.month}')" class="bg-green-500 text-white px-2 py-1 rounded text-xs"><i class="fab fa-whatsapp"></i> Send</button></td>
+                                </tr>`;
+                            }).join('')}</tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('billUser')?.addEventListener('change', (e) => {
+                const selected = e.target.options[e.target.selectedIndex];
+                const monthlyBill = selected.getAttribute('data-bill');
+                if (monthlyBill) {
+                    document.getElementById('packageAmount').value = formatCurrency(parseFloat(monthlyBill));
+                    updatePreviousDue();
+                }
+            });
+            
+            document.getElementById('billMonth')?.addEventListener('change', () => updatePreviousDue());
+        }
+
+        function renderMonthlyOverview(container) {
+            const monthOptions = getMonthOptions();
+            const currentMonth = formatMonthYear(new Date());
+            
+            function loadOverview(monthYear) {
+                const overview = getMonthlyOverview(monthYear);
+                const totalAmount = overview.reduce((sum, o) => sum + o.currentBill, 0);
+                const totalPaid = overview.reduce((sum, o) => sum + o.paid, 0);
+                const totalDue = overview.reduce((sum, o) => sum + o.due, 0);
+                
+                container.innerHTML = `
+                    <div class="bg-white rounded-xl p-4 shadow-sm">
+                        <div class="mb-4">
+                            <label class="block text-sm font-semibold mb-2">Select Month</label>
+                            <select id="overviewMonth" class="px-3 py-2 border rounded-lg">
+                                ${monthOptions.map(m => `<option value="${m}" ${m === monthYear ? 'selected' : ''}>${m}</option>`).join('')}
+                            </select>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            <div class="bg-blue-50 rounded-lg p-3 text-center"><p class="text-sm">Total Bill Amount</p><p class="text-xl font-bold">${formatCurrency(totalAmount)}</p></div>
+                            <div class="bg-green-50 rounded-lg p-3 text-center"><p class="text-sm">Total Collected</p><p class="text-xl font-bold text-green-600">${formatCurrency(totalPaid)}</p></div>
+                            <div class="bg-red-50 rounded-lg p-3 text-center"><p class="text-sm">Total Due</p><p class="text-xl font-bold text-red-600">${formatCurrency(totalDue)}</p></div>
+                        </div>
+                        
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-50">
+                                    <tr><th class="p-3 text-left">User ID</th><th class="p-3 text-left">Name</th><th class="p-3 text-left">Phone</th><th class="p-3 text-left">Package</th><th class="p-3 text-left">Previous Due</th><th class="p-3 text-left">Current Bill</th><th class="p-3 text-left">Paid</th><th class="p-3 text-left">Due</th><th class="p-3 text-left">Status</th></tr>
+                                </thead>
+                                <tbody>${overview.map(o => `
+                                    <tr class="border-b">
+                                        <td class="p-3">${o.userId}</td>
+                                        <td class="p-3">${o.name}</td>
+                                        <td class="p-3">${o.phone}</td>
+                                        <td class="p-3">${formatCurrency(o.monthlyBill)}</td>
+                                        <td class="p-3 text-orange-600">${formatCurrency(o.previousDue)}</td>
+                                        <td class="p-3">${formatCurrency(o.currentBill)}</td>
+                                        <td class="p-3 text-green-600">${formatCurrency(o.paid)}</td>
+                                        <td class="p-3 ${o.due > 0 ? 'text-red-600 font-bold' : ''}">${formatCurrency(o.due)}</td>
+                                        <td class="p-3"><span class="px-2 py-1 rounded-full text-xs ${o.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">${o.status}</span></td>
+                                    </tr>
+                                `).join('')}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('overviewMonth')?.addEventListener('change', (e) => loadOverview(e.target.value));
+            }
+            
+            loadOverview(currentMonth);
+        }
+
+        function renderTransactionsPage(container) {
+            container.innerHTML = `
+                <div class="bg-white rounded-xl p-4 shadow-sm">
+                    <h3 class="font-semibold mb-3">All Transactions</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="border-b">
+                                <tr><th class="text-left py-2">Date</th><th class="text-left">User</th><th class="text-left">Month</th><th class="text-left">Amount</th><th class="text-left">Method</th><th class="text-left">Received By</th></tr>
+                            </thead>
+                            <tbody>${[...appData.transactions].reverse().map(t => `
+                                <tr class="border-b"><td class="py-2">${t.date}</td><td class="py-2">${t.userName || t.userId}</td><td class="py-2">${t.monthYear || '-'}</td><td class="text-green-600 py-2">${formatCurrency(t.amount)}</td><td class="py-2">${t.method}</td><td class="py-2">${t.receivedBy || 'admin'}</td></tr>
+                            `).join('')}</tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderSettingsPage(container) {
+            const lastBackup = appData.lastBackupTime ? formatDate(appData.lastBackupTime) + ' ' + appData.lastBackupTime.toLocaleTimeString() : 'No backup yet';
+            
+            container.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-white rounded-xl p-4">
+                        <h3 class="font-semibold mb-3">Admin Settings</h3>
+                        <div class="mb-3"><label class="block text-sm mb-1">Change Admin PIN</label><input type="password" id="newPin" class="w-full px-3 py-2 border rounded-lg" placeholder="New PIN"></div>
+                        <div class="mb-3"><label class="block text-sm mb-1">Late Fee (৳)</label><input type="number" id="lateFee" class="w-full px-3 py-2 border rounded-lg" value="${appData.admin.lateFee}"></div>
+                        <div class="mb-3"><label class="block text-sm mb-1">Due Days</label><input type="number" id="dueDays" class="w-full px-3 py-2 border rounded-lg" value="${appData.admin.dueDays}"></div>
+                        <button onclick="saveSettings()" class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full">Save Settings</button>
+                    </div>
+                    <div class="bg-white rounded-xl p-4">
+                        <h3 class="font-semibold mb-3">Data Management</h3>
+                        <div class="mb-3 p-2 bg-gray-50 rounded">
+                            <p class="text-sm text-gray-600">Last Backup: <span class="font-semibold">${lastBackup}</span></p>
+                        </div>
+                        <button onclick="backupData()" class="bg-green-600 text-white px-4 py-2 rounded-lg w-full mb-2"><i class="fas fa-download"></i> Download Backup</button>
+                        <label class="bg-purple-600 text-white px-4 py-2 rounded-lg w-full block text-center cursor-pointer"><i class="fas fa-upload"></i> Restore from Backup<input type="file" id="restoreFile" accept=".json" class="hidden" onchange="restoreData(this)"></label>
+                        <button onclick="resetAllData()" class="bg-red-600 text-white px-4 py-2 rounded-lg w-full mt-2"><i class="fas fa-trash"></i> Reset All Data</button>
+                    </div>
+                    <div class="bg-white rounded-xl p-4 md:col-span-2">
+                        <h3 class="font-semibold mb-3">Company Information</h3>
+                        <p>📍 ${appData.settings.address}</p>
+                        <p>📞 ${appData.settings.phone.join(', ')}</p>
+                        <p>📧 ${appData.settings.email}</p>
+                        <p>💬 WhatsApp: ${appData.settings.whatsapp}</p>
+                        <p class="text-sm text-gray-500 mt-2">Version: ${appData.settings.version} | Dev: Freelancer Milon</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderCustomerPortal(user) {
+            const totalDue = getTotalPreviousDue(user.userId, formatMonthYear(new Date()));
+            
+            const html = `
+                <div class="min-h-screen bg-gray-100">
+                    <header class="bg-white shadow-sm p-4 flex justify-between items-center">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center"><span class="text-white font-bold text-sm">SM</span></div>
+                            <span class="font-bold">SM-Cable Network</span>
+                        </div>
+                        <div class="flex gap-3">
+                            <button onclick="logout()" class="text-red-600"><i class="fas fa-sign-out-alt"></i></button>
+                        </div>
+                    </header>
+                    <main class="p-4 max-w-3xl mx-auto">
+                        <div class="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-6 text-white mb-4">
+                            <h2 class="text-xl font-bold">Welcome, ${user.name}!</h2>
+                            <p>${user.userId} | ${user.phone}</p>
+                        </div>
+                        
+                        <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
+                            <h3 class="font-semibold mb-2">Current Bill Status</h3>
+                            <div class="grid grid-cols-3 gap-3">
+                                <div class="p-2 bg-gray-50 rounded text-center"><p class="text-sm">Monthly Bill</p><p class="font-bold">${formatCurrency(user.monthlyBill)}</p></div>
+                                <div class="p-2 bg-gray-50 rounded text-center"><p class="text-sm">Total Due</p><p class="font-bold text-red-600">${formatCurrency(totalDue)}</p></div>
+                                <div class="p-2 bg-gray-50 rounded text-center"><p class="text-sm">Package</p><p class="font-bold">${user.packageName}</p></div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
+                            <h3 class="font-semibold mb-2">Billing History</h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm">
+                                    <thead class="border-b"><tr><th class="text-left py-2">Month</th><th class="text-left">Package</th><th class="text-left">Previous Due</th><th class="text-left">Total</th><th class="text-left">Paid</th><th class="text-left">Due</th><th class="text-left">Status</th></tr></thead>
+                                    <tbody>${appData.bills.filter(b => b.userId === user.userId).sort((a,b) => b.month.localeCompare(a.month)).map(b => `<tr class="border-b">
+                                        <td class="py-2">${b.month}</td>
+                                        <td class="py-2">${formatCurrency(b.packageAmount || user.monthlyBill)}</td>
+                                        <td class="py-2">${formatCurrency(b.previousDue || 0)}</td>
+                                        <td class="py-2">${formatCurrency(b.amount)}</td>
+                                        <td class="py-2 text-green-600">${formatCurrency(b.paid)}</td>
+                                        <td class="py-2 ${b.due > 0 ? 'text-red-600' : ''}">${formatCurrency(b.due)}</td>
+                                        <td class="py-2">${b.status}</td>
+                                    </tr>`).join('')}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
+                            <h3 class="font-semibold mb-2">Payment History</h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm">
+                                    <thead class="border-b"><tr><th class="text-left py-2">Date</th><th class="text-left">Month</th><th class="text-left">Amount</th><th class="text-left">Method</th></tr></thead>
+                                    <tbody>${appData.transactions.filter(t => t.userId === user.userId).map(t => `<tr class="border-b"><td class="py-2">${t.date}</td><td class="py-2">${t.monthYear}</td><td class="text-green-600 py-2">${formatCurrency(t.amount)}</td><td class="py-2">${t.method}</td></tr>`).join('')}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <a href="${user.paymentLink}" target="_blank" class="bg-green-600 text-white p-3 rounded-xl text-center block mb-4 font-semibold"><i class="fab fa-google-pay"></i> Pay Now (Online)</a>
+                        <button onclick="sendSupportWhatsAppFromCustomer('${user.phone}')" class="bg-green-500 text-white p-3 rounded-xl text-center block w-full mb-4"><i class="fab fa-whatsapp"></i> Contact Support</button>
+                    </main>
+                </div>
+            `;
+            document.getElementById("app").innerHTML = html;
+        }
+
+        // ==================== GLOBAL FUNCTIONS ====================
+        window.setView = (view) => { currentView = view; renderCurrentView(); };
+        window.toggleSidebar = () => document.getElementById("sidebar")?.classList.toggle("open");
+        window.closeSidebar = () => document.getElementById("sidebar")?.classList.remove("open");
+        window.toggleDarkMode = () => { darkMode = !darkMode; localStorage.setItem("darkMode", darkMode); renderApp(); };
+        
+        window.showLoginTab = (tab) => {
+            const adminForm = document.getElementById("adminLoginForm");
+            const customerForm = document.getElementById("customerLoginForm");
+            const adminBtn = document.getElementById("adminTabBtn");
+            const customerBtn = document.getElementById("customerTabBtn");
+            if (tab === "admin") {
+                adminForm.style.display = "block";
+                customerForm.style.display = "none";
+                adminBtn.className = "flex-1 py-2 rounded-lg font-semibold bg-blue-600 text-white";
+                customerBtn.className = "flex-1 py-2 rounded-lg font-semibold bg-gray-200 text-gray-700";
+            } else {
+                adminForm.style.display = "none";
+                customerForm.style.display = "block";
+                customerBtn.className = "flex-1 py-2 rounded-lg font-semibold bg-blue-600 text-white";
+                adminBtn.className = "flex-1 py-2 rounded-lg font-semibold bg-gray-200 text-gray-700";
+            }
+        };
+        
+        window.adminLogin = () => {
+            const pin = document.getElementById("adminPin").value;
+            if (pin === appData.admin.pin) {
+                sessionStorage.setItem("loggedIn", "true");
+                sessionStorage.setItem("userType", "admin");
+                renderApp();
+            } else { Swal.fire("Error", "Invalid PIN!", "error"); }
+        };
+        
+        window.customerLogin = () => {
+            const phone = document.getElementById("customerPhone").value;
+            const password = document.getElementById("customerPassword").value;
+            const user = appData.users.find(u => u.phone === phone && u.password === password);
+            if (user) {
+                sessionStorage.setItem("loggedIn", "true");
+                sessionStorage.setItem("userType", "customer");
+                sessionStorage.setItem("userId", user.userId);
+                renderApp();
+            } else { Swal.fire("Error", "Invalid credentials!", "error"); }
+        };
+        
+        window.logout = () => { sessionStorage.clear(); renderApp(); };
+        
+        window.showAddUserModal = () => {
+            Swal.fire({
+                title: 'Add New User',
+                html: `
+                    <input id="userId" class="swal2-input" placeholder="User ID" required>
+                    <input id="name" class="swal2-input" placeholder="Full Name" required>
+                    <input id="phone" class="swal2-input" placeholder="Phone Number" required>
+                    <input id="password" class="swal2-input" placeholder="Password" type="password" required>
+                    <select id="packageSelect" class="swal2-select">
+                        <option value="">Select Package</option>
+                        ${[...appData.packages.internet, ...appData.packages.cable, ...appData.packages.combo].map(p => `<option value="${p.id}|${p.name}|${p.price}">${p.name} - ${formatCurrency(p.price)}</option>`).join('')}
+                    </select>
+                    <input id="expiredDate" class="swal2-input" placeholder="Expiry Date (DD-MM-YYYY)" required>
+                `,
+                preConfirm: () => {
+                    const userId = document.getElementById('userId').value;
+                    if (appData.users.find(u => u.userId === userId)) {
+                        Swal.showValidationMessage('User ID exists!');
+                        return false;
+                    }
+                    const packageData = document.getElementById('packageSelect').value.split('|');
+                    return {
+                        userId: userId,
+                        name: document.getElementById('name').value,
+                        phone: document.getElementById('phone').value,
+                        password: document.getElementById('password').value,
+                        packageId: packageData[0],
+                        packageName: packageData[1],
+                        monthlyBill: parseFloat(packageData[2]),
+                        connectionType: packageData[1].includes('Combo') ? 'Both' : (packageData[1].includes('Mbps') ? 'Internet' : 'Cable'),
+                        address: "N/A",
+                        expiredDate: document.getElementById('expiredDate').value,
+                        paymentLink: `https://pay.smcable.net/${userId}`,
+                        status: "active",
+                        createdAt: formatDate(new Date())
+                    };
+                }
+            }).then(result => {
+                if (result.isConfirmed) {
+                    appData.users.push(result.value);
+                    saveToLocal();
+                    Swal.fire('Success', 'User added!', 'success');
+                    renderCurrentView();
+                }
+            });
+        };
+        
+        window.editUser = (userId) => {
+            const user = appData.users.find(u => u.userId === userId);
+            if (!user) return;
+            Swal.fire({
+                title: 'Edit User',
+                html: `
+                    <input id="editName" class="swal2-input" value="${user.name}" placeholder="Name">
+                    <input id="editPhone" class="swal2-input" value="${user.phone}" placeholder="Phone">
+                    <select id="editPackage" class="swal2-select">
+                        ${[...appData.packages.internet, ...appData.packages.cable, ...appData.packages.combo].map(p => `<option value="${p.id}|${p.name}|${p.price}" ${user.packageId === p.id ? 'selected' : ''}>${p.name} - ${formatCurrency(p.price)}</option>`).join('')}
+                    </select>
+                    <input id="editExpiry" class="swal2-input" value="${user.expiredDate}" placeholder="Expiry Date">
+                    <select id="editStatus" class="swal2-select">
+                        <option value="active" ${user.status === 'active' ? 'selected' : ''}>Active</option>
+                        <option value="expired" ${user.status === 'expired' ? 'selected' : ''}>Expired</option>
+                    </select>
+                `,
+                preConfirm: () => {
+                    const packageData = document.getElementById('editPackage').value.split('|');
+                    return {
+                        name: document.getElementById('editName').value,
+                        phone: document.getElementById('editPhone').value,
+                        packageId: packageData[0],
+                        packageName: packageData[1],
+                        monthlyBill: parseFloat(packageData[2]),
+                        expiredDate: document.getElementById('editExpiry').value,
+                        status: document.getElementById('editStatus').value
+                    };
+                }
+            }).then(result => {
+                if (result.isConfirmed) {
+                    Object.assign(user, result.value);
+                    saveToLocal();
+                    Swal.fire('Updated!', '', 'success');
+                    renderCurrentView();
+                }
+            });
+        };
+        
+        window.deleteUser = (userId) => {
+            Swal.fire({ title: 'Confirm', text: 'Delete user?', icon: 'warning', showCancelButton: true }).then(result => {
+                if (result.isConfirmed) {
+                    appData.users = appData.users.filter(u => u.userId !== userId);
+                    appData.bills = appData.bills.filter(b => b.userId !== userId);
+                    saveToLocal();
+                    Swal.fire('Deleted', '', 'success');
+                    renderCurrentView();
+                }
+            });
+        };
+        
+        window.createNewBill = () => {
+            const userId = document.getElementById('billUser')?.value;
+            const month = document.getElementById('billMonth')?.value;
+            if (!userId || !month) { Swal.fire('Error', 'Select user and month', 'error'); return; }
+            const bill = generateMonthlyBill(userId, month);
+            if (bill) { 
+                Swal.fire('Success', 'Bill generated & WhatsApp notification sent!', 'success'); 
+                renderCurrentView();
+            } else { 
+                Swal.fire('Error', 'Cannot generate bill', 'error'); 
+            }
+        };
+        
+        window.recordPaymentFromAdmin = () => {
+            const userId = document.getElementById('paymentUser')?.value;
+            const month = document.getElementById('paymentMonth')?.value;
+            const amount = parseFloat(document.getElementById('paymentAmount')?.value);
+            const method = document.getElementById('paymentMethod')?.value;
+            if (!userId || !month || !amount) { Swal.fire('Error', 'Fill all fields', 'error'); return; }
+            const result = recordPayment(userId, month, amount, method);
+            if (result.success) { 
+                Swal.fire('Success', `Payment of ${formatCurrency(result.amount)} recorded! Remaining due: ${formatCurrency(result.remaining)}`, 'success'); 
+                renderCurrentView();
+            } else { 
+                Swal.fire('Error', result.message, 'error'); 
+            }
+        };
+        
+        window.sendBillInvoice = (userId, month) => {
+            const user = appData.users.find(u => u.userId === userId);
+            const bill = appData.bills.find(b => b.userId === userId && b.month === month);
+            if (user && bill) sendInvoiceWhatsApp(user, bill);
+        };
+        
+        window.sendSupportWhatsAppFromCustomer = (phone) => sendSupportWhatsApp(phone);
+        
+        window.showAddPackageModal = (type) => {
+            Swal.fire({
+                title: `Add ${type} Package`,
+                html: `<input id="pkgName" class="swal2-input" placeholder="Package Name"><input id="pkgPrice" class="swal2-input" placeholder="Price" type="number">`,
+                preConfirm: () => {
+                    const name = document.getElementById('pkgName').value;
+                    const price = parseFloat(document.getElementById('pkgPrice').value);
+                    if (!name || !price) { Swal.showValidationMessage('Fill all fields'); return false; }
+                    return { name, price };
+                }
+            }).then(result => {
+                if (result.isConfirmed) {
+                    addPackage(type, result.value.name, result.value.price);
+                    renderCurrentView();
+                }
+            });
+        };
+        
+        window.showEditPackageModal = (type, id, name, price) => {
+            Swal.fire({
+                title: 'Edit Package',
+                html: `<input id="pkgName" class="swal2-input" value="${name}"><input id="pkgPrice" class="swal2-input" value="${price}" type="number">`,
+                preConfirm: () => {
+                    const newName = document.getElementById('pkgName').value;
+                    const newPrice = parseFloat(document.getElementById('pkgPrice').value);
+                    return { name: newName, price: newPrice };
+                }
+            }).then(result => {
+                if (result.isConfirmed) {
+                    editPackage(type, id, result.value.name, result.value.price);
+                    renderCurrentView();
+                }
+            });
+        };
+        
+        window.deletePackageItem = (type, id) => {
+            Swal.fire({ title: 'Confirm', text: 'Delete package?', icon: 'warning', showCancelButton: true }).then(result => {
+                if (result.isConfirmed) { deletePackage(type, id); renderCurrentView(); }
+            });
+        };
+        
+        window.saveSettings = () => {
+            appData.admin.lateFee = parseFloat(document.getElementById('lateFee')?.value) || 50;
+            appData.admin.dueDays = parseInt(document.getElementById('dueDays')?.value) || 30;
+            const newPin = document.getElementById('newPin')?.value;
+            if (newPin && newPin.length >= 4) appData.admin.pin = newPin;
+            saveToLocal();
+            Swal.fire('Saved', 'Settings updated!', 'success');
+        };
+        
+        window.backupData = () => {
+            const data = { users: appData.users, packages: appData.packages, bills: appData.bills, transactions: appData.transactions, admin: appData.admin, settings: appData.settings, lastBackupTime: new Date().toISOString() };
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `smcable_backup_${formatDate(new Date())}.json`;
+            link.click();
+            appData.lastBackupTime = new Date();
+            saveToLocal();
+        };
+        
+        window.restoreData = (input) => {
+            const file = input.files[0];
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (data.users) appData.users = data.users;
+                    if (data.packages) appData.packages = data.packages;
+                    if (data.bills) appData.bills = data.bills;
+                    if (data.transactions) appData.transactions = data.transactions;
+                    if (data.admin) appData.admin = data.admin;
+                    if (data.settings) appData.settings = data.settings;
+                    appData.lastBackupTime = new Date();
+                    saveToLocal();
+                    Swal.fire('Restored', 'Data restored successfully!', 'success').then(() => location.reload());
+                } catch (err) { Swal.fire('Error', 'Invalid backup file', 'error'); }
+            };
+            reader.readAsText(file);
+        };
+        
+        window.resetAllData = () => {
+            Swal.fire({ title: 'Confirm Reset', text: 'This will delete ALL data!', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33' }).then(result => {
+                if (result.isConfirmed) {
+                    localStorage.removeItem("smcable_data");
+                    location.reload();
+                }
+            });
+        };
+        
+        // Initialize
+        loadFromLocal();
+        renderApp();
+    </script>
+</body>
+</html>
